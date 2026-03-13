@@ -339,13 +339,17 @@ pre { background:#070910;border:1px solid var(--border);border-top:none;border-r
         <div class="form-grid" style="margin-bottom:16px;">
           <div class="fg full">
             <label class="lbl">Cloud-Image auswählen</label>
-            <div class="os-grid" id="ciOsGrid" style="margin-bottom:0;">
-              <div class="os-card active" data-ci="ubuntu24" onclick="selectCiOs(this)" data-url="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img" data-name="ubuntu-24.04-cloud.img"><span class="os-icon">🐧</span>Ubuntu 24.04</div>
-              <div class="os-card" data-ci="ubuntu22" onclick="selectCiOs(this)" data-url="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img" data-name="ubuntu-22.04-cloud.img"><span class="os-icon">🐧</span>Ubuntu 22.04</div>
+            <div class="os-grid" id="ciOsGrid" style="margin-bottom:0;grid-template-columns:repeat(4,1fr);">
+              <div class="os-card active" data-ci="ubuntu2404" onclick="selectCiOs(this)" data-url="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img" data-name="ubuntu-24.04-cloud.img"><span class="os-icon">🐧</span>Ubuntu 24.04</div>
+              <div class="os-card" data-ci="ubuntu2204" onclick="selectCiOs(this)" data-url="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img" data-name="ubuntu-22.04-cloud.img"><span class="os-icon">🐧</span>Ubuntu 22.04</div>
               <div class="os-card" data-ci="debian12" onclick="selectCiOs(this)" data-url="https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2" data-name="debian-12-cloud.qcow2"><span class="os-icon">🌀</span>Debian 12</div>
+              <div class="os-card" data-ci="debian11" onclick="selectCiOs(this)" data-url="https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-genericcloud-amd64.qcow2" data-name="debian-11-cloud.qcow2"><span class="os-icon">🌀</span>Debian 11</div>
               <div class="os-card" data-ci="rocky9" onclick="selectCiOs(this)" data-url="https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2" data-name="rocky-9-cloud.qcow2"><span class="os-icon">🪨</span>Rocky 9</div>
+              <div class="os-card" data-ci="rocky8" onclick="selectCiOs(this)" data-url="https://dl.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud.latest.x86_64.qcow2" data-name="rocky-8-cloud.qcow2"><span class="os-icon">🪨</span>Rocky 8</div>
               <div class="os-card" data-ci="alma9" onclick="selectCiOs(this)" data-url="https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2" data-name="almalinux-9-cloud.qcow2"><span class="os-icon">🎯</span>AlmaLinux 9</div>
-              <div class="os-card" data-ci="fedora40" onclick="selectCiOs(this)" data-url="https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/x86_64/images/Fedora-Cloud-Base-Generic.x86_64-40-1.14.qcow2" data-name="fedora-40-cloud.qcow2"><span class="os-icon">🎩</span>Fedora 40</div>
+              <div class="os-card" data-ci="alma8" onclick="selectCiOs(this)" data-url="https://repo.almalinux.org/almalinux/8/cloud/x86_64/images/AlmaLinux-8-GenericCloud-latest.x86_64.qcow2" data-name="almalinux-8-cloud.qcow2"><span class="os-icon">🎯</span>AlmaLinux 8</div>
+              <div class="os-card" data-ci="fedora41" onclick="selectCiOs(this)" data-url="https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2" data-name="fedora-41-cloud.qcow2"><span class="os-icon">🎩</span>Fedora 41</div>
+              <div class="os-card" data-ci="opensuse" onclick="selectCiOs(this)" data-url="https://download.opensuse.org/repositories/Cloud:/Images:/openSUSE_Leap_15.6/images/openSUSE-Leap-15.6.x86_64-NoCloud.qcow2" data-name="opensuse-leap-15.6-cloud.qcow2"><span class="os-icon">🦎</span>openSUSE 15.6</div>
               <div class="os-card" data-ci="arch" onclick="selectCiOs(this)" data-url="https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2" data-name="arch-cloud.qcow2"><span class="os-icon">🏹</span>Arch Linux</div>
               <div class="os-card" data-ci="custom" onclick="selectCiOs(this)" data-url="" data-name=""><span class="os-icon">🔗</span>Eigene URL</div>
             </div>
@@ -639,18 +643,29 @@ async function loadAll() {
 
 async function loadNodeData(node) {
   const storages = await api(`/nodes/${node}/storage`);
+  // Proxmox returns active/enabled as 1/0 or sometimes omits them — treat missing as active
   const active = storages.filter(s => s.active !== 0 && s.enabled !== 0);
+  const pool = active.length ? active : storages; // fallback: show all if filter yields nothing
 
-  // Disk storages
-  const diskSt = active.filter(s => /images|rootdir/.test(s.content||'')).map(s => s.storage);
-  fillSel('selStorage', diskSt, diskSt[0]);
-  document.getElementById('storageHint').textContent = diskSt.length + ' verfügbar';
+  // Disk storages — images (KVM/Ceph) + rootdir (LXC) + any RBD/Ceph pool
+  const diskSt = pool.filter(s => {
+    const ct = s.content || '';
+    return ct.includes('images') || ct.includes('rootdir') || s.type === 'rbd' || s.type === 'cephfs';
+  }).map(s => s.storage);
+  // Fallback: show everything if still empty
+  const diskList = diskSt.length ? diskSt : pool.map(s => s.storage);
+  fillSel('selStorage', diskList, diskList[0]);
+  document.getElementById('storageHint').textContent = diskList.length + ' verfügbar';
 
-  // ISO storages
-  const isoSt = active.filter(s => /iso/.test(s.content||'')).map(s => s.storage);
-  fillSel('selIsoStorage', isoSt, isoSt[0]);
-  fillSel('ciImgStorage', isoSt, isoSt[0]);
-  document.getElementById('isoStorageHint').textContent = isoSt.length + ' Storage(s)';
+  // ISO storages — also include any storage that can hold iso content
+  const isoSt = pool.filter(s => {
+    const ct = s.content || '';
+    return ct.includes('iso') || ct.includes('vztmpl');
+  }).map(s => s.storage);
+  const isoList = isoSt.length ? isoSt : ['local'];
+  fillSel('selIsoStorage', isoList, isoList[0]);
+  fillSel('ciImgStorage', isoList, isoList[0]);
+  document.getElementById('isoStorageHint').textContent = isoList.length + ' Storage(s)';
   if (isoSt[0]) {
     await loadIsos(isoSt[0]);
     document.getElementById('selIsoStorage').onchange = e => loadIsos(e.target.value);
@@ -1196,8 +1211,10 @@ async function deploy() {
       logStep('☁️ Cloud-Init Modus — kein Installer nötig', 'info');
 
       // Step 1: Download cloud image via Proxmox storage download API
+      // Images are always stored on local/iso-capable storage, not Ceph
+      // ciImgStorage should be 'local' or another iso-capable storage
       const imgVolId = `${c.ciImgStorage}:iso/${c.ciImgName}`;
-      logStep(`Cloud-Image herunterladen: ${c.ciImgName}…`, 'info');
+      logStep(`Cloud-Image herunterladen: ${c.ciImgName} → ${c.ciImgStorage}…`, 'info');
       try {
         const dlTask = await apiPost(`/nodes/${c.node}/storage/${c.ciImgStorage}/download-url`, {
           url:      c.ciImgUrl,
@@ -1208,8 +1225,15 @@ async function deploy() {
         await waitForTask(c.node, dlTask);
         logStep(`Image heruntergeladen ✓`, 'ok');
       } catch(e) {
-        if (e.message.includes('already exists') || e.message.includes('already')) {
+        if (e.message.includes('already exists') || e.message.includes('file already')) {
           logStep(`Image bereits vorhanden — übersprungen ✓`, 'ok');
+        } else if (e.message.includes('AllocateTemplate') || e.message.includes('Permission')) {
+          throw new Error(
+            'Keine Berechtigung für "' + c.ciImgStorage + '". ' +
+            'Lösung: In Proxmox → Datacenter → Permissions → API Token Permission → ' +
+            'Storage: ' + c.ciImgStorage + ', Role: PVEDatastoreAdmin setzen. ' +
+            'Oder Token auf Administrator-Rolle setzen.'
+          );
         } else {
           throw new Error('Image-Download fehlgeschlagen: ' + e.message);
         }
@@ -1238,14 +1262,15 @@ async function deploy() {
       logStep(`VM ${c.id} erstellt ✓`, 'ok');
 
       // Step 3: Import the cloud image as disk
-      logStep(`Cloud-Image als Disk importieren…`, 'info');
+      // scsi0 target is selStorage (can be Ceph), image source is ciImgStorage (local/iso)
+      logStep(`Cloud-Image als Disk importieren nach ${c.storage}…`, 'info');
       const importTask = await apiPost(`/nodes/${c.node}/qemu/${c.id}/config`, {
-        scsi0: `${c.ciImgStorage}:0,import-from=${imgVolId},format=qcow2`,
+        scsi0: `${c.storage}:0,import-from=${imgVolId},format=qcow2`,
         boot:  'order=scsi0',
         ide2:  `${c.storage}:cloudinit`,
       });
       await waitForTask(c.node, importTask);
-      logStep(`Disk importiert ✓`, 'ok');
+      logStep(`Disk nach ${c.storage} importiert ✓`, 'ok');
 
       // Step 4: Resize disk to configured size
       logStep(`Disk auf ${c.disk} GB vergrößern…`, 'info');
